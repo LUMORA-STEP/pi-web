@@ -31,7 +31,7 @@ try {
 const { port, hostname, openBrowser } = parseLaunchOptions();
 
 if (!fs.existsSync(nextDir)) {
-  console.error("Build artifacts not found. Please report this issue.");
+  console.error("未找到构建产物，请报告此问题。");
   process.exit(1);
 }
 
