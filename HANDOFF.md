@@ -7,9 +7,9 @@
 仓库地址：Gitee仓库地址（尚未配置远程仓库，目前仅本地 git commit 8423680）
 
 ## 2. 当前任务（核心目标）
-全面深入检查所有汉化修改文件的完整链路，修复发现的汉化遗漏、安全问题和一致性问题，端到端测试通过；并修复 Windows 平台下 auth.json 凭证写入失败、/api/models 返回空导致输入框下方不显示模型选项两个核心阻塞问题。
-验收标准：所有用户可见文本完全汉化，TypeScript/ESLint 通过，API 链路和浏览器 UI 测试通过，模型密钥可保存、模型选择器正常显示。
-**当前状态：所有核心阻塞问题已解决，全部任务完成。**
+全面深入检查软件 BUG，覆盖 API 路由层、核心 Hooks、核心组件、Lib 工具层、浏览器端运行验证、静态检查（TypeScript + ESLint）。
+验收标准：所有层级代码审查通过，无关键 BUG，浏览器端无控制台错误/警告，网络请求全部正常。
+**当前状态：全面 BUG 排查完成，未发现关键 BUG。**
 
 ## 3. 已完成内容（逐条清单）
 - [x] 任务1：克隆 GitHub 项目到本地 + 完成时间：2026-07-20 + 验证结果：项目已成功克隆到 d:\项目\PI
@@ -49,17 +49,18 @@
 - [x] 任务35：最终全链路验证 + 完成时间：2026-07-21 + 验证结果：POST/GET/DELETE api-key 全流程通过，/api/models 返回 9 个模型，新建会话 200，TypeScript+ESLint 通过
 
 ## 4. 当前卡点（阻塞/未解决问题）
-无。所有核心阻塞问题已解决。
+无。全面 BUG 排查完成，未发现关键 BUG。
 
 备注：
-- deepseek API key 当前为测试值（sk-test-verify-12345），用户需通过 UI 配置面板重新输入真实密钥
-- Windows 上 auth.json 写入的 EPERM 问题经分析确认为间歇性问题（SDK 的 proper-lockfile 用 mkdir 做临时锁，不持有持久文件句柄），当前采用“进程内直接写入 + PowerShell Start-Process 降级”双层方案，已稳定工作
+- 代码质量良好：TypeScript + ESLint 通过，浏览器端无控制台错误/警告
+- 核心防护机制完善：内存泄漏防护、竞态条件防护、SSE 重连与状态恢复、Windows 平台兼容
+- 之前用户报告的"消息无回复"问题根因是早期 API key 无效（测试值），设置真实密钥后系统正常工作
 
 ## 5. 下一步执行顺序（不可颠倒）
 所有计划任务已完成。后续可选优化：
-1. 用户通过 UI 配置面板重新输入真实 deepseek API key（当前为测试值）
-2. 如后续再次出现 EPERM，可尝试将 `C:\Users\Administrator\.pi\agent\` 目录添加到 Windows Defender 排除列表
-3. 可考虑将 auth.json 写入操作改为异步（避免 spawnSync 阻塞请求）
+1. 如后续再次出现 EPERM，可尝试将 `C:\Users\Administrator\.pi\agent\` 目录添加到 Windows Defender 排除列表
+2. 可考虑将 auth.json 写入操作改为异步（避免 spawnSync 阻塞请求）
+3. 可考虑添加端到端自动化测试（Playwright/Cypress）覆盖核心链路
 
 ## 6. 历史踩坑记录（全项目汇总，持续新增）
 | 发生时间 | 问题现象 | 根因 | 解决方案 | 后续规避规则 |
