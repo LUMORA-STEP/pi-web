@@ -49,6 +49,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ success: true, sessionId: realSessionId, data: result });
   } catch (error) {
+    console.error("POST /api/agent/new error:", error);
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }

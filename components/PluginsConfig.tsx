@@ -447,7 +447,7 @@ function PackageDetail({
                 color: "var(--text-dim)",
               }}
             >
-              disabled
+              已禁用
             </span>
           ) : pkg.filtered && (
             <span
@@ -459,7 +459,7 @@ function PackageDetail({
                 color: "#d97706",
               }}
             >
-              filtered
+              已过滤
             </span>
           )}
           <span

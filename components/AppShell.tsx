@@ -958,7 +958,7 @@ export function AppShell() {
                       }}>
                         {sessionInfoSection}
                         {section("消息数", messageRows)}
-                        {section("Token", [...tokenRows, ...extraTokenRows], "right", true)}
+                        {section("令牌", [...tokenRows, ...extraTokenRows], "right", true)}
                       </div>
                     );
                   })() : (

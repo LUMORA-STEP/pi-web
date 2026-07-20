@@ -831,7 +831,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     ? `${compactResult.reason[0].toUpperCase()}${compactResult.reason.slice(1)} 已压缩`
     : "已压缩";
   const compactResultText = compactResult
-    ? `${compactVerb} ${formatTokenCount(compactResult.tokensBefore)} → ${formatTokenCount(compactResult.estimatedTokensAfter)} tokens（节省 ${formatTokenCount(compactSavedTokens)}）`
+    ? `${compactVerb} ${formatTokenCount(compactResult.tokensBefore)} → ${formatTokenCount(compactResult.estimatedTokensAfter)} 令牌（节省 ${formatTokenCount(compactSavedTokens)} 令牌）`
     : null;
   const thinkingDisplayLabel = (() => {
     const lvl = thinkingLevel ?? "auto";

@@ -1,55 +1,81 @@
 import { ModelRuntime, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { NextResponse } from "next/server";
 import { invalidateModelsCache } from "@/lib/models-cache";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, mkdirSync } from "fs";
 import { spawnSync } from "child_process";
-import { join, resolve } from "path";
+import { join, resolve, dirname } from "path";
+import { tmpdir } from "os";
 
 export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ provider: string }> };
 
-// Windows 上 dev server 长驻进程内的 graceful-fs / proper-lockfile 会缓存 auth.json
-// 的文件句柄（非共享写入模式），导致 dev server 进程内任何对 auth.json 的写入
-// （writeFileSync / renameSync / unlinkSync）都失败 with EPERM。
-//
-// 即使通过 spawnSync 启动子进程，libuv 在 Windows 上默认使用 bInheritHandles=TRUE，
-// 子进程仍然继承 dev server 持有的 auth.json 句柄，依然无法写入。
-//
-// 解决方案：通过 PowerShell 的 Start-Process 启动独立 Node 进程。
-// Start-Process 默认使用 ShellExecuteEx（UseShellExecute=true），
-// ShellExecuteEx 不会继承父进程的句柄，因此独立进程能正常写入 auth.json。
-function runAuthWriteScript(mode: "write" | "delete", authPath: string, provider: string, apiKey?: string): void {
-  // 临时使用 auth-test.js 进行诊断
-  const scriptPath = resolve(process.cwd(), "lib", "auth-test.js");
-  const os = require("os") as typeof import("os");
-  const stdoutFile = join(os.tmpdir(), `pi-auth-stdout-${Date.now()}.txt`);
-  const stderrFile = join(os.tmpdir(), `pi-auth-stderr-${Date.now()}.txt`);
-  const psCommand = `$p = Start-Process -FilePath '${process.execPath}' -ArgumentList '${scriptPath}','${authPath}' -Wait -PassThru -WindowStyle Hidden -RedirectStandardOutput '${stdoutFile}' -RedirectStandardError '${stderrFile}'; exit $p.ExitCode`;
-  const psArgs = ["-NoProfile", "-NonInteractive", "-Command", psCommand];
-  const result = spawnSync("powershell.exe", psArgs, {
+/**
+ * 原子写入：先写临时文件再 rename 替换目标。
+ * 如果 rename 失败（Windows 文件锁），降级为直接 writeFileSync。
+ */
+function atomicWriteFileSync(targetPath: string, content: string): void {
+  const dir = dirname(targetPath);
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+  const tmpFile = join(tmpdir(), `pi-auth-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+  writeFileSync(tmpFile, content, "utf-8");
+  try {
+    renameSync(tmpFile, targetPath);
+  } catch {
+    // rename 失败时尝试直接写入
+    try { unlinkSync(tmpFile); } catch { /* ignore */ }
+    writeFileSync(targetPath, content, "utf-8");
+  }
+}
+
+/**
+ * 读取当前 auth.json 内容，修改指定 provider 的凭证后写回。
+ * 优先在进程内直接写入；若遇 EPERM 则通过 PowerShell Start-Process
+ * 启动独立 Node 进程（lib/auth-write.js）完成写入。
+ */
+function modifyCredential(mode: "write" | "delete", provider: string, apiKey?: string): void {
+  const authPath = join(getAgentDir(), "auth.json");
+
+  // 第一步：尝试进程内直接写入
+  try {
+    let data: Record<string, unknown> = {};
+    if (existsSync(authPath)) {
+      try { data = JSON.parse(readFileSync(authPath, "utf-8")); } catch { data = {}; }
+    }
+    if (mode === "write") {
+      data[provider] = { type: "api_key", key: apiKey };
+    } else {
+      delete data[provider];
+    }
+    atomicWriteFileSync(authPath, JSON.stringify(data, null, 2));
+    return; // 成功
+  } catch (directErr) {
+    const code = (directErr as NodeJS.ErrnoException).code;
+    if (code !== "EPERM" && code !== "EACCES" && code !== "EBUSY") {
+      throw directErr; // 非文件锁错误，直接抛出
+    }
+    console.error(`[auth-write] 进程内写入失败 (${code})，降级为独立进程写入`);
+  }
+
+  // 第二步：通过 PowerShell Start-Process 启动独立 Node 进程写入
+  const scriptPath = resolve(process.cwd(), "lib", "auth-write.js");
+  const args = mode === "write"
+    ? [scriptPath, "write", authPath, provider, apiKey!]
+    : [scriptPath, "delete", authPath, provider];
+  const argStr = args.map((a) => `'${a}'`).join(",");
+  const psCommand = `$p = Start-Process -FilePath '${process.execPath}' -ArgumentList ${argStr} -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode`;
+  const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", psCommand], {
     encoding: "utf-8",
     windowsHide: true,
-    timeout: 20000,
+    timeout: 15000,
   });
-  let stdoutContent = "";
-  let stderrContent = "";
-  try {
-    if (existsSync(stdoutFile)) stdoutContent = readFileSync(stdoutFile, "utf-8");
-    if (existsSync(stderrFile)) stderrContent = readFileSync(stderrFile, "utf-8");
-  } catch { /* ignore */ }
-  console.error(`[auth-test] ps_exit=${result.status} stdout=${stdoutContent} stderr=${stderrContent} ps_stderr=${result.stderr || "(empty)"}`);
-  throw new Error(`诊断测试完成（exit ${result.status}）: stdout=${stdoutContent}`);
-}
-
-function writeCredentialDirectly(provider: string, apiKey: string): void {
-  const authPath = join(getAgentDir(), "auth.json");
-  runAuthWriteScript("write", authPath, provider, apiKey);
-}
-
-function deleteCredentialDirectly(provider: string): void {
-  const authPath = join(getAgentDir(), "auth.json");
-  runAuthWriteScript("delete", authPath, provider);
+  if (result.status !== 0) {
+    throw new Error(
+      `auth.json 写入失败（独立进程 exit ${result.status}）: ${result.stderr || "unknown error"}`,
+    );
+  }
 }
 
 // GET /api/auth/api-key/[provider] — returns auth status (never returns the actual key)
@@ -90,9 +116,7 @@ export async function POST(req: Request, { params }: Params) {
     }
     const trimmedKey = apiKey.trim();
 
-    // 通过子进程写入 auth.json，避免 dev server 进程内的 graceful-fs 缓存句柄
-    // 导致的 EPERM 写入失败。
-    writeCredentialDirectly(provider, trimmedKey);
+    modifyCredential("write", provider, trimmedKey);
     invalidateModelsCache();
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -105,7 +129,7 @@ export async function POST(req: Request, { params }: Params) {
 export async function DELETE(_req: Request, { params }: Params) {
   const { provider } = await params;
   try {
-    deleteCredentialDirectly(provider);
+    modifyCredential("delete", provider);
     invalidateModelsCache();
     return NextResponse.json({ success: true });
   } catch (error) {

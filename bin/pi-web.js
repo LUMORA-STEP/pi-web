@@ -64,7 +64,7 @@ child.stdout.on("data", (chunk) => {
     });
 
     opener.on("error", (error) => {
-      console.warn(`Could not open browser automatically: ${error.message}`);
+      console.warn(`无法自动打开浏览器：${error.message}`);
     });
 
     opener.unref();

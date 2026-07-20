@@ -1,6 +1,8 @@
 import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, Theme } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
+import { existsSync, mkdirSync } from "fs";
+import { join, resolve as resolvePath } from "path";
 import { invalidateModelsCache } from "./models-cache";
 import { cacheSessionPath, invalidateSessionListCache } from "./session-reader";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
@@ -96,6 +98,46 @@ function withExtensionTools(session: AgentSessionLike, toolNames: string[]): str
     .filter((name) => !codingToolNames.has(name));
 
   return [...new Set([...toolNames, ...extensionToolNames])];
+}
+
+// ----------------------------------------------------------------------------
+// Session directory pre-creation
+//
+// The SDK's getDefaultSessionDir() calls fs.mkdirSync without retry. On Windows,
+// when the encoded path contains Unicode (e.g. CJK chars from a localized cwd
+// like "d:\项目\PI") and an antivirus/file indexer briefly locks the parent,
+// mkdirSync fails intermittently with EPERM even though the user has full
+// permissions. Pre-creating the directory here with a short retry means the
+// SDK's existsSync check returns true and its mkdirSync is never reached.
+// ----------------------------------------------------------------------------
+
+function computeDefaultSessionDir(cwd: string, agentDir: string): string {
+  const resolvedCwd = resolvePath(cwd);
+  const resolvedAgentDir = resolvePath(agentDir);
+  const safePath = `--${resolvedCwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+  return join(resolvedAgentDir, "sessions", safePath);
+}
+
+async function ensureSessionDirExists(cwd: string, agentDir: string): Promise<void> {
+  const sessionDir = computeDefaultSessionDir(cwd, agentDir);
+  if (existsSync(sessionDir)) return;
+
+  const maxAttempts = 3;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      mkdirSync(sessionDir, { recursive: true });
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "EPERM" && attempt < maxAttempts - 1) {
+        await new Promise((r) => setTimeout(r, 100 * (attempt + 1)));
+        // Another process may have created it while we waited.
+        if (existsSync(sessionDir)) return;
+        continue;
+      }
+      throw err;
+    }
+  }
 }
 
 // ============================================================================
@@ -977,6 +1019,12 @@ export async function startRpcSession(
     initTheme();
     const agentDir = getAgentDir();
 
+    // Pre-create the session directory for new sessions to work around an
+    // intermittent EPERM from Windows antivirus/indexers locking Unicode paths
+    // during the SDK's mkdirSync call. See ensureSessionDirExists for details.
+    if (!sessionFile) {
+      await ensureSessionDirExists(cwd, agentDir);
+    }
     const sessionManager = sessionFile
       ? SessionManager.open(sessionFile, undefined)
       : SessionManager.create(cwd, undefined);

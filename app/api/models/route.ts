@@ -51,7 +51,8 @@ async function loadModels(cwd: string): Promise<ModelsData> {
   const available = await services.modelRuntime.getAvailable();
   const settings: SettingsManager = services.settingsManager;
   const enabledModels = settings.getEnabledModels();
-  let visible = filterByExactEnabledModels(available, enabledModels);
+  type VisibleModel = { id: string; name: string; provider: string; thinkingLevelMap?: Record<string, string | null> };
+  let visible: readonly VisibleModel[] = filterByExactEnabledModels(available, enabledModels);
 
   // Windows fallback: SDK 的 AuthStorage.reload() 在 lockfile.lockSync 失败时
   // 静默吞错并保持 this.data = {}，导致 getAvailable() 因没有凭证返回空数组。
@@ -97,7 +98,9 @@ async function loadModels(cwd: string): Promise<ModelsData> {
   for (const m of visible) {
     const key = `${m.provider}:${m.id}`;
     nameMap.set(key, m.name);
-    thinkingLevels[key] = getSupportedThinkingLevels(m);
+    // getSupportedThinkingLevels 只使用 reasoning 和 thinkingLevelMap 字段
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    thinkingLevels[key] = getSupportedThinkingLevels(m as any);
     if (m.thinkingLevelMap) thinkingLevelMaps[key] = m.thinkingLevelMap;
   }
 

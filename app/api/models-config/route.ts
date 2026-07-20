@@ -61,6 +61,6 @@ export async function PUT(req: Request) {
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("PUT /api/models-config error:", error);
-    return NextResponse.json({ error: String(error), stack: (error as Error).stack }, { status: 500 });
+    return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
