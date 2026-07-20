@@ -17,21 +17,21 @@ function packageKey(pkg: Pick<PluginPackageInfo, "source" | "scope">): string {
 }
 
 function resourceSummary(pkg: PluginPackageInfo): string {
-  if (pkg.disabled) return "Disabled";
+  if (pkg.disabled) return "已禁用";
   const parts = [
-    pkg.counts.extensions ? `${pkg.counts.extensions} ext` : "",
-    pkg.counts.skills ? `${pkg.counts.skills} skills` : "",
-    pkg.counts.prompts ? `${pkg.counts.prompts} prompts` : "",
-    pkg.counts.themes ? `${pkg.counts.themes} themes` : "",
+    pkg.counts.extensions ? `${pkg.counts.extensions} 扩展` : "",
+    pkg.counts.skills ? `${pkg.counts.skills} 技能` : "",
+    pkg.counts.prompts ? `${pkg.counts.prompts} 提示` : "",
+    pkg.counts.themes ? `${pkg.counts.themes} 主题` : "",
   ].filter(Boolean);
-  return parts.length ? parts.join(" · ") : "No resources";
+  return parts.length ? parts.join(" · ") : "无资源";
 }
 
 function versionSummary(pkg: PluginPackageInfo): string {
   const parts = [];
-  if (pkg.version) parts.push(`installed ${pkg.version}`);
-  if (pkg.configuredVersion) parts.push(`configured ${pkg.configuredVersion}`);
-  return parts.length ? parts.join(" · ") : "Unknown";
+  if (pkg.version) parts.push(`已安装 ${pkg.version}`);
+  if (pkg.configuredVersion) parts.push(`已配置 ${pkg.configuredVersion}`);
+  return parts.length ? parts.join(" · ") : "未知";
 }
 
 function installLocation(scope: PluginScope, cwd: string): string {
@@ -61,10 +61,10 @@ function statusColor(status: PluginPackageInfo["status"]): string {
 
 function ResourceList({ pkg }: { pkg: PluginPackageInfo }) {
   const groups = ([
-    ["extension", "Extensions"],
-    ["skill", "Skills"],
-    ["prompt", "Prompts"],
-    ["theme", "Themes"],
+    ["extension", "扩展"],
+    ["skill", "技能"],
+    ["prompt", "提示词"],
+    ["theme", "主题"],
   ] as const)
     .map(([kind, label]) => ({
       kind,
@@ -76,7 +76,7 @@ function ResourceList({ pkg }: { pkg: PluginPackageInfo }) {
   if (groups.length === 0) {
     return (
       <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
-        {pkg.disabled ? "Package disabled" : "No resolved resources"}
+        {pkg.disabled ? "插件包已禁用" : "无已解析的资源"}
       </div>
     );
   }
@@ -148,6 +148,7 @@ function ResourceList({ pkg }: { pkg: PluginPackageInfo }) {
 }
 
 function ScopeTag({ scope }: { scope: PluginScope }) {
+  const label = scope === "project" ? "项目" : "全局";
   return (
     <span
       style={{
@@ -159,7 +160,7 @@ function ScopeTag({ scope }: { scope: PluginScope }) {
         color: scope === "project" ? "rgba(99,102,241,0.85)" : "var(--text-dim)",
       }}
     >
-      {scope}
+      {label}
     </span>
   );
 }
@@ -245,23 +246,26 @@ function SegmentedScope({
         height: 30,
       }}
     >
-      {(["global", "project"] as PluginScope[]).map((scope) => {
-        const active = value === scope;
+      {([
+        { key: "global", label: "全局" },
+        { key: "project", label: "项目" },
+      ] as const).map(({ key, label }) => {
+        const active = value === key;
         return (
           <button
-            key={scope}
-            onClick={() => onChange(scope)}
+            key={key}
+            onClick={() => onChange(key)}
             style={{
               width: 76,
               border: "none",
-              borderRight: scope === "global" ? "1px solid var(--border)" : "none",
+              borderRight: key === "global" ? "1px solid var(--border)" : "none",
               background: active ? "var(--bg-selected)" : "none",
               color: active ? "var(--text)" : "var(--text-muted)",
               cursor: "pointer",
               fontSize: 12,
             }}
           >
-            {scope}
+            {label}
           </button>
         );
       })}
@@ -299,7 +303,7 @@ function AddPluginPanel({
     <div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 660, minHeight: "100%" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>
-          Add Plugin
+          添加插件
         </div>
         <div style={{ fontSize: 12, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
           {installLocation(scope, cwd)}
@@ -308,7 +312,7 @@ function AddPluginPanel({
 
       <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
         <label htmlFor="plugin-source" style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>
-          Source
+          来源
         </label>
         <input
           id="plugin-source"
@@ -347,13 +351,13 @@ function AddPluginPanel({
             borderColor: "var(--accent)",
           }}
         >
-          {busy ? "Installing..." : "Install"}
+          {busy ? "安装中..." : "安装"}
         </button>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
         <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>
-          Examples
+          示例
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {examples.map((example) => (
@@ -430,7 +434,7 @@ function PackageDetail({
             enabled={enabled}
             loading={busy || reloadBusy}
             onToggle={() => onAction(pkg.disabled ? "enable" : "disable", pkg)}
-            label={pkg.disabled ? "Enable package" : "Disable package"}
+            label={pkg.disabled ? "启用插件包" : "禁用插件包"}
           />
           <ScopeTag scope={pkg.scope} />
           {pkg.disabled ? (
@@ -478,22 +482,22 @@ function PackageDetail({
             disabled={busy || reloadBusy}
             style={buttonStyle(busy || reloadBusy)}
           >
-            {busyKey === `update:${key}` ? "Updating..." : "Update"}
+            {busyKey === `update:${key}` ? "更新中..." : "更新"}
           </button>
           <button
             onClick={onReloadSession}
             disabled={!sessionId || reloadBusy || busy}
             style={buttonStyle(!sessionId || reloadBusy || busy)}
-            title={sessionId ? "Reload current session" : "Open a session to reload"}
+            title={sessionId ? "重新加载当前会话" : "打开会话以重新加载"}
           >
-            {reloadBusy ? "Reloading..." : "Reload session"}
+            {reloadBusy ? "重新加载中..." : "重新加载会话"}
           </button>
           <button
             onClick={() => onAction("remove", pkg)}
             disabled={busy || reloadBusy}
             style={buttonStyle(busy || reloadBusy, true)}
           >
-            {busyKey === `remove:${key}` ? "Removing..." : "Remove"}
+            {busyKey === `remove:${key}` ? "移除中..." : "移除"}
           </button>
         </div>
       </div>
@@ -507,17 +511,21 @@ function PackageDetail({
           lineHeight: 1.45,
         }}
       >
-        <div style={{ color: "var(--text-dim)" }}>Status</div>
-        <div style={{ color: statusColor(pkg.status), textTransform: "capitalize" }}>{pkg.status}</div>
-        <div style={{ color: "var(--text-dim)" }}>Version</div>
+        <div style={{ color: "var(--text-dim)" }}>状态</div>
+        <div style={{ color: statusColor(pkg.status) }}>{
+          pkg.status === "loaded" ? "已加载" :
+          pkg.status === "installed" ? "已安装" :
+          pkg.status === "disabled" ? "已禁用" : pkg.status
+        }</div>
+        <div style={{ color: "var(--text-dim)" }}>版本</div>
         <div style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>{versionSummary(pkg)}</div>
-        <div style={{ color: "var(--text-dim)" }}>Package</div>
+        <div style={{ color: "var(--text-dim)" }}>包名</div>
         <div style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)", overflowWrap: "anywhere" }}>
-          {pkg.packageName ?? "Unknown"}
+          {pkg.packageName ?? "未知"}
         </div>
-        <div style={{ color: "var(--text-dim)" }}>Resources</div>
+        <div style={{ color: "var(--text-dim)" }}>资源</div>
         <div style={{ color: "var(--text-muted)" }}>{resourceSummary(pkg)}</div>
-        <div style={{ color: "var(--text-dim)" }}>Installed path</div>
+        <div style={{ color: "var(--text-dim)" }}>安装路径</div>
         <div
           style={{
             color: pkg.installedPath ? "var(--text-muted)" : "#ef4444",
@@ -525,9 +533,9 @@ function PackageDetail({
             overflowWrap: "anywhere",
           }}
         >
-          {pkg.installedPath ? shortenPath(pkg.installedPath) : "Not found"}
+          {pkg.installedPath ? shortenPath(pkg.installedPath) : "未找到"}
         </div>
-        <div style={{ color: "var(--text-dim)" }}>Cwd</div>
+        <div style={{ color: "var(--text-dim)" }}>工作目录</div>
         <div style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)", overflowWrap: "anywhere" }}>
           {shortenPath(cwd)}
         </div>
@@ -535,7 +543,7 @@ function PackageDetail({
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>
-          Resolved Resources
+          已解析的资源
         </div>
         <ResourceList pkg={pkg} />
       </div>
@@ -582,7 +590,11 @@ export function PluginsConfig({
 
   const groupedPackages = useMemo(() => {
     return (["project", "global"] as PluginScope[])
-      .map((scope) => ({ scope, packages: packages.filter((pkg) => pkg.scope === scope) }))
+      .map((scope) => ({
+        scope,
+        label: scope === "project" ? "项目" : "全局",
+        packages: packages.filter((pkg) => pkg.scope === scope),
+      }))
       .filter((group) => group.packages.length > 0);
   }, [packages]);
 
@@ -627,13 +639,13 @@ export function PluginsConfig({
       if (action === "remove") {
         setSelected(next.packages[0] ? packageKey(next.packages[0]) : null);
         if (next.packages.length === 0) setAddMode(true);
-        setActionMessage("Package removed.");
+        setActionMessage("插件包已移除。");
       } else {
         const messages: Record<Exclude<PluginAction, "remove">, string> = {
-          install: "Package installed.",
-          update: "Package updated.",
-          disable: "Package disabled.",
-          enable: "Package enabled.",
+          install: "插件包已安装。",
+          update: "插件包已更新。",
+          disable: "插件包已禁用。",
+          enable: "插件包已启用。",
         };
         setActionMessage(messages[action]);
       }
@@ -664,7 +676,7 @@ export function PluginsConfig({
       setSelected(installed ? packageKey(installed) : key);
       setAddMode(false);
       setInstallSource("");
-      setActionMessage("Package installed.");
+      setActionMessage("插件包已安装。");
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -681,7 +693,7 @@ export function PluginsConfig({
       await sendAgentCommand(sessionId, { type: "reload" });
       onReloaded?.();
       await loadPlugins();
-      setActionMessage("Session reloaded.");
+      setActionMessage("会话已重新加载。");
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -733,7 +745,7 @@ export function PluginsConfig({
         >
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
             <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>
-              Plugins
+              插件
             </span>
             <code
               style={{
@@ -780,7 +792,7 @@ export function PluginsConfig({
             <div style={{ flex: 1, overflowY: "auto", padding: "8px 6px" }}>
               {loading ? (
                 <div style={{ padding: "10px 8px", fontSize: 12, color: "var(--text-muted)" }}>
-                  Loading...
+                  加载中...
                 </div>
               ) : error ? (
                 <div style={{ padding: "10px 8px", fontSize: 11, color: "#ef4444" }}>
@@ -788,7 +800,7 @@ export function PluginsConfig({
                 </div>
               ) : packages.length === 0 ? (
                 <div style={{ padding: "10px 8px", fontSize: 11, color: "var(--text-dim)" }}>
-                  No plugins configured
+                  未配置插件
                 </div>
               ) : (
                 groupedPackages.map((group) => (
@@ -802,7 +814,7 @@ export function PluginsConfig({
                         textTransform: "uppercase",
                       }}
                     >
-                      {group.scope}
+                      {group.label}
                     </div>
                     {group.packages.map((pkg) => {
                       const key = packageKey(pkg);
@@ -930,7 +942,7 @@ export function PluginsConfig({
                   <line x1="12" y1="5" x2="12" y2="19" />
                   <line x1="5" y1="12" x2="19" y2="12" />
                 </svg>
-                Add plugin
+                添加插件
               </button>
             </div>
           </div>
@@ -970,7 +982,7 @@ export function PluginsConfig({
                   fontSize: 13,
                 }}
               >
-                Select a package
+                选择一个插件包
               </div>
             )}
           </div>
@@ -993,19 +1005,19 @@ export function PluginsConfig({
                 title={data.diagnostics.map((d) => `${d.type}: ${d.source ? `${d.source}: ` : ""}${d.message}`).join("\n")}
                 style={{ color: data.diagnostics.some((d) => d.type === "error") ? "#ef4444" : "#d97706" }}
               >
-                {data.diagnostics.length} diagnostic{data.diagnostics.length === 1 ? "" : "s"}
+                {data.diagnostics.length} 条诊断{data.diagnostics.length === 1 ? "" : ""}
               </span>
             ) : (
               <span>
-                {data ? `${data.totals.extensions} ext · ${data.totals.skills} skills · ${data.totals.prompts} prompts · ${data.totals.themes} themes` : ""}
+                {data ? `${data.totals.extensions} 扩展 · ${data.totals.skills} 技能 · ${data.totals.prompts} 提示词 · ${data.totals.themes} 主题` : ""}
               </span>
             )}
           </div>
           <button onClick={() => void loadPlugins()} disabled={loading || busyKey !== null} style={buttonStyle(loading || busyKey !== null)}>
-            Refresh
+            刷新
           </button>
           <button onClick={onClose} style={buttonStyle(false)}>
-            Close
+            关闭
           </button>
         </div>
       </div>
