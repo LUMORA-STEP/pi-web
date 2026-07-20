@@ -1,5 +1,6 @@
 import { stat } from "fs/promises";
-import { resolve } from "path";
+import { existsSync, readFileSync } from "fs";
+import { resolve, join } from "path";
 import { createAgentSessionServices, getAgentDir, type SettingsManager } from "@earendil-works/pi-coding-agent";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { loadModelsWithCache, type ModelsData } from "@/lib/models-cache";
@@ -50,7 +51,44 @@ async function loadModels(cwd: string): Promise<ModelsData> {
   const available = await services.modelRuntime.getAvailable();
   const settings: SettingsManager = services.settingsManager;
   const enabledModels = settings.getEnabledModels();
-  const visible = filterByExactEnabledModels(available, enabledModels);
+  let visible = filterByExactEnabledModels(available, enabledModels);
+
+  // Windows fallback: SDK 的 AuthStorage.reload() 在 lockfile.lockSync 失败时
+  // 静默吞错并保持 this.data = {}，导致 getAvailable() 因没有凭证返回空数组。
+  // 直接读取 auth.json，对有凭证的 provider 调用 getModels() 绕过 auth 检查。
+  if (visible.length === 0) {
+    try {
+      const authPath = join(agentDir, "auth.json");
+      if (existsSync(authPath)) {
+        const authData = JSON.parse(readFileSync(authPath, "utf-8")) as Record<string, { type?: string }>;
+        const providersWithCreds = Object.keys(authData).filter((id) => authData[id]?.type);
+        if (providersWithCreds.length > 0) {
+          const fallback: { id: string; name: string; provider: string; thinkingLevelMap?: Record<string, string | null> }[] = [];
+          for (const providerId of providersWithCreds) {
+            const provider = services.modelRuntime.getProvider(providerId);
+            if (!provider) continue;
+            try {
+              const models = provider.getModels();
+              for (const m of models) {
+                fallback.push({
+                  id: m.id,
+                  name: m.name,
+                  provider: m.provider,
+                  thinkingLevelMap: m.thinkingLevelMap,
+                });
+              }
+            } catch {
+              // 单个 provider 失败时跳过，继续尝试其他
+            }
+          }
+          visible = filterByExactEnabledModels(fallback, enabledModels);
+        }
+      }
+    } catch {
+      // fallback 读取失败时保持空 visible
+    }
+  }
+
   modelList = visible.map((m: { id: string; name: string; provider: string }) => ({
     id: m.id,
     name: m.name,
@@ -67,6 +105,9 @@ async function loadModels(cwd: string): Promise<ModelsData> {
   const modelId = settings.getDefaultModel();
   if (provider && modelId && visible.some((m) => m.provider === provider && m.id === modelId)) {
     defaultModel = { provider, modelId };
+  } else if (visible.length > 0) {
+    // 如果配置的默认模型不可用，回退到第一个可用模型
+    defaultModel = { provider: visible[0].provider, modelId: visible[0].id };
   }
 
   return { models: Object.fromEntries(nameMap), modelList, defaultModel, thinkingLevels, thinkingLevelMaps };
@@ -96,7 +137,8 @@ export async function GET(req: Request) {
 
   try {
     return Response.json(await loadModelsWithCache(cwd, () => loadModels(cwd)));
-  } catch {
+  } catch (err) {
+    console.error("[/api/models] loadModels failed:", err);
     return Response.json(EMPTY_MODELS);
   }
 }
