@@ -7,9 +7,9 @@
 仓库地址：Gitee仓库地址（尚未配置远程仓库，目前仅本地 git commit 8423680）
 
 ## 2. 当前任务（核心目标）
-全面深入检查软件 BUG，覆盖 API 路由层、核心 Hooks、核心组件、Lib 工具层、浏览器端运行验证、静态检查（TypeScript + ESLint）。
-验收标准：所有层级代码审查通过，无关键 BUG，浏览器端无控制台错误/警告，网络请求全部正常。
-**当前状态：全面 BUG 排查完成，未发现关键 BUG。**
+修复"未找到所选模型的 API 密钥"错误 + 会话文件创建 EPERM 问题。
+验收标准：使用 DeepSeek V4 Pro 模型发送消息能正常获得 AI 回复，会话文件正确持久化。
+**当前状态：两项修复均已完成，端到端验证通过（AI 成功回复"OK"）。**
 
 ## 3. 已完成内容（逐条清单）
 - [x] 任务1：克隆 GitHub 项目到本地 + 完成时间：2026-07-20 + 验证结果：项目已成功克隆到 d:\项目\PI
@@ -46,15 +46,17 @@
 - [x] 任务32：彻底修复 POST /api/auth/api-key 写入失败问题 + 完成时间：2026-07-21 + 验证结果：重写 api-key route 使用进程内 atomicWriteFileSync + PowerShell Start-Process 降级；经分析确认 EPERM 为间歇性问题（SDK 不持有持久句柄），当前写入链路完全正常
 - [x] 任务33：清理诊断文件 + 完成时间：2026-07-21 + 验证结果：删除 lib/auth-test.js 和 .tmp-auth-test.json，保留 lib/auth-write.js 作为生产降级脚本
 - [x] 任务34：修复 models/route.ts TypeScript 类型错误 + 完成时间：2026-07-21 + 验证结果：添加 VisibleModel 类型声明，tsc --noEmit 通过
-- [x] 任务35：最终全链路验证 + 完成时间：2026-07-21 + 验证结果：POST/GET/DELETE api-key 全流程通过，/api/models 返回 9 个模型，新建会话 200，TypeScript+ESLint 通过
+- [x] 任务36：修复"未找到所选模型的 API 密钥"错误 + 完成时间：2026-07-21 + 验证结果：在 startRpcSession 中添加 injectStoredApiKeys()，直接读取 auth.json 并通过 modelRuntime.setRuntimeApiKey() 注入密钥，绕过 Windows 上失灵的 AuthStorage
+- [x] 任务37：修复会话文件创建 EPERM 导致消息丢失 + 完成时间：2026-07-21 + 验证结果：添加 preCreateSessionFile() 预创建空文件（4次重试）+ 改用 SessionManager.open() 使 SDK 走 appendFileSync 路径，避免中途 openSync("wx") 失败
+- [x] 任务38：端到端验证 + 完成时间：2026-07-21 + 验证结果：DeepSeek V4 Pro 完整流式回复（thinking + text "OK"），会话文件 8 条目正确持久化，TypeScript + ESLint 通过
 
 ## 4. 当前卡点（阻塞/未解决问题）
-无。全面 BUG 排查完成，未发现关键 BUG。
+无。两项核心修复已完成并验证。
 
 备注：
-- 代码质量良好：TypeScript + ESLint 通过，浏览器端无控制台错误/警告
-- 核心防护机制完善：内存泄漏防护、竞态条件防护、SSE 重连与状态恢复、Windows 平台兼容
-- 之前用户报告的"消息无回复"问题根因是早期 API key 无效（测试值），设置真实密钥后系统正常工作
+- API 密钥问题根因：SDK AuthStorage.reload() 在 Windows 上静默失败 → injectStoredApiKeys 运行时注入解决
+- 会话文件 EPERM 根因：SDK 延迟用 openSync("wx") 创建新文件被杀毒软件拦截 → 预创建空文件 + SessionManager.open() 解决
+- 若 dev server 进程被杀毒软件持续标记，重启 dev server 可解除
 
 ## 5. 下一步执行顺序（不可颠倒）
 所有计划任务已完成。后续可选优化：
@@ -73,4 +75,6 @@
 | 2026-07-21 | 安全问题：stack 字段泄露到前端 | agent/new 和 models-config 路由在错误响应中包含 (error as Error).stack，会暴露文件路径和依赖版本 | 移除 stack 字段，仅保留 console.error 服务端日志 | 错误响应不应包含 stack 字段，stack 只应记录在服务端日志 |
 | 2026-07-21 | 术语不一致：Token 与 令牌 混用 | AppShell.tsx 中 section("Token", ...) 与 ModelsConfig.tsx 中“令牌”不统一 | 统一为“令牌” | 汉化后需做术语一致性检查，同一概念在所有文件中应保持一致 |
 | 2026-07-21 | /api/models 返回空 modelList 导致输入框下方不显示模型选项 | SDK AuthStorage.reload() 在 lockfile.lockSync 失败时静默吞错保持 this.data={}，getAvailable() 因无凭证返回空数组 | 在 /api/models 路由添加 Windows fallback：getAvailable() 返回空时直接读 auth.json，对有凭证的 provider 调用 provider.getModels() 绕过 auth 检查；defaultModel 不可用时回退到第一个可用模型 | Windows 上 SDK 的 AuthStorage 可能因 lockfile 失败而返回空数据，所有依赖 getAvailable() 的接口都需要 fallback |
-| 2026-07-21 | POST /api/auth/api-key 写入失败 EPERM | 间歇性问题：经分析 SDK 的 proper-lockfile 用 mkdir 做临时锁不持有持久句柄，EPERM 可能由 Windows Defender/索引器瞬时锁定引起；之前的诊断期间恰好持续触发 | 重写 api-key route：进程内 atomicWriteFileSync（tmp+rename）为主，PowerShell Start-Process 独立进程写入为降级方案；删除诊断脚本 | Windows 上文件写入应使用“直接写入+降级”双层方案，不应依赖单一写入路径；诊断完成后及时清理临时脚本 |
+| 2026-07-21 | POST /api/auth/api-key 写入失败 EPERM | 间歇性问题：经分析 SDK 的 proper-lockfile 用 mkdir 做临时锁不持有持久句柄，EPERM 可能由 Windows Defender/索引器瞬时锁定引起；之前的诊断期间恰好持续触发 | 重写 api-key route：进程内 atomicWriteFileSync（tmp+rename）为主，PowerShell Start-Process 独立进程写入为降级方案；删除诊断脚本 | Windows 上文件写入应使用"直接写入+降级"双层方案，不应依赖单一写入路径；诊断完成后及时清理临时脚本 |
+| 2026-07-21 | 对话时提示"未找到所选模型的 API 密钥" | SDK AuthStorage.reload() 在 Windows 上因 lockfile EPERM 静默失败，this.data 为空，prompt 时 _getRequiredRequestAuth 找不到凭证 | startRpcSession 中添加 injectStoredApiKeys()：直接读 auth.json，对 type=api_key 的条目调用 modelRuntime.setRuntimeApiKey() 注入运行时凭证覆盖层 | 所有依赖 SDK AuthStorage 的运行时路径都需要 fallback 注入机制 |
+| 2026-07-21 | 会话文件创建 EPERM 导致用户消息丢失 | SDK 延迟到第一条 assistant 消息时才用 openSync(path,"wx") 创建 .jsonl 文件，O_EXCL 创建被杀毒软件拦截，此时 prompt 已无法重试 | preCreateSessionFile() 预创建空文件（4次重试200ms递增）+ 改用 SessionManager.open(emptyFile, undefined, cwd)，SDK 检测空文件后自行写 header 并设 flushed=true，后续全部走 appendFileSync | 文件创建（O_EXCL）比追加写入更容易被拦截；应在可控时机预创建文件并带重试 |

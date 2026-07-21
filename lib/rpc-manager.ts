@@ -1,7 +1,7 @@
 import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, Theme } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
-import { existsSync, mkdirSync } from "fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync } from "fs";
 import { join, resolve as resolvePath } from "path";
 import { invalidateModelsCache } from "./models-cache";
 import { cacheSessionPath, invalidateSessionListCache } from "./session-reader";
@@ -137,6 +137,79 @@ async function ensureSessionDirExists(cwd: string, agentDir: string): Promise<vo
       }
       throw err;
     }
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Session file pre-creation
+//
+// The SDK lazily creates the session .jsonl file (openSync path "wx") when the
+// first assistant message is persisted. On Windows, the long-running dev-server
+// process intermittently receives EPERM when creating brand-new files (O_EXCL)
+// in the sessions directory — antivirus/indexer interception. Because the
+// failure happens mid-prompt, the user's message is lost with no retry.
+//
+// Fix: pre-create an EMPTY file here (with retry). SessionManager.open() on an
+// existing empty file writes the session header itself (openSync "w" on an
+// existing file — no O_EXCL creation) and marks the manager as flushed, so all
+// subsequent persistence uses appendFileSync on the existing file.
+// ----------------------------------------------------------------------------
+
+async function preCreateSessionFile(cwd: string, agentDir: string): Promise<string> {
+  const sessionDir = computeDefaultSessionDir(cwd, agentDir);
+  const fileTimestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const filePath = join(sessionDir, `${fileTimestamp}_${randomUUID()}.jsonl`);
+
+  const maxAttempts = 4;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const fd = openSync(filePath, "wx");
+      closeSync(fd);
+      return filePath;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if ((code === "EPERM" || code === "EACCES") && attempt < maxAttempts - 1) {
+        await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
+        continue;
+      }
+      throw err;
+    }
+  }
+  return filePath; // unreachable, satisfies TS
+}
+
+// ----------------------------------------------------------------------------
+// Runtime API key injection
+//
+// On Windows the SDK's DefaultAuthStorage.reload() can fail silently when
+// proper-lockfile's lockSync encounters a transient EPERM (antivirus/indexer).
+// When that happens AuthStorage.data stays empty and every prompt throws
+// "No API key found for the selected model". Reading auth.json ourselves and
+// injecting api_key credentials via ModelRuntime.setRuntimeApiKey() bypasses
+// the broken storage — RuntimeCredentials checks the override map first.
+// ----------------------------------------------------------------------------
+
+async function injectStoredApiKeys(
+  session: AgentSessionLike,
+  agentDir: string
+): Promise<void> {
+  try {
+    const authPath = join(agentDir, "auth.json");
+    if (!existsSync(authPath)) return;
+    const raw = JSON.parse(readFileSync(authPath, "utf-8")) as Record<
+      string,
+      { type?: string; key?: string } | undefined
+    >;
+    for (const [providerId, entry] of Object.entries(raw)) {
+      if (entry?.type === "api_key" && entry.key) {
+        await session.modelRuntime.setRuntimeApiKey(providerId, entry.key);
+      }
+    }
+  } catch (err) {
+    console.warn(
+      "[pi-web] failed to inject stored API keys:",
+      err instanceof Error ? err.message : err
+    );
   }
 }
 
@@ -1019,15 +1092,19 @@ export async function startRpcSession(
     initTheme();
     const agentDir = getAgentDir();
 
-    // Pre-create the session directory for new sessions to work around an
-    // intermittent EPERM from Windows antivirus/indexers locking Unicode paths
-    // during the SDK's mkdirSync call. See ensureSessionDirExists for details.
-    if (!sessionFile) {
+    // Pre-create the session directory and file for new sessions to work around
+    // intermittent EPERM from Windows antivirus/indexers. See
+    // ensureSessionDirExists and preCreateSessionFile for details.
+    let sessionManager: SessionManager;
+    if (sessionFile) {
+      sessionManager = SessionManager.open(sessionFile, undefined);
+    } else {
       await ensureSessionDirExists(cwd, agentDir);
+      const preCreatedFile = await preCreateSessionFile(cwd, agentDir);
+      // open() on an existing empty file initializes the header and sets
+      // flushed=true, avoiding the SDK's lazy O_EXCL file creation mid-prompt.
+      sessionManager = SessionManager.open(preCreatedFile, undefined, cwd);
     }
-    const sessionManager = sessionFile
-      ? SessionManager.open(sessionFile, undefined)
-      : SessionManager.create(cwd, undefined);
 
     // Determine which tools to pass based on requested toolNames.
     // Since v0.68.0, session creation expects string[] tool names instead of Tool[] instances.
@@ -1051,6 +1128,11 @@ export async function startRpcSession(
       sessionManager,
       ...(toolsOption !== undefined ? { tools: toolsOption } : {}),
     });
+
+    // Inject API keys from auth.json into the runtime credential overlay.
+    // Works around AuthStorage.reload() silently failing on Windows (EPERM
+    // from proper-lockfile), which leaves the SDK unable to find credentials.
+    await injectStoredApiKeys(inner, agentDir);
 
     // If specific tool names were requested (non-empty), set the active tools to the
     // requested builtin coding tools PLUS all extension/package tools, so installed
